@@ -73,11 +73,6 @@ class OwnerUtils(breadcord.module.ModuleCog):
             self.shell.enabled = False
             self.evaluate.enabled = False
 
-    async def cog_command_error(self, ctx: commands.Context, error: Exception):
-        if isinstance(error, commands.DisabledCommand):
-            raise commands.CommandNotFound(f'Command "{ctx.invoked_with}" is not found')
-        raise error
-
     @commands.command()
     @commands.is_owner()
     async def stop(self, ctx: commands.Context) -> None:
