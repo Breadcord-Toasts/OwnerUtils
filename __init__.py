@@ -16,7 +16,7 @@ def clean_output(output: str, /) -> str:
 
     # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
     # It should remove escape codes (I hope)
-    output = re.sub(r"[\x07\x1b\[].*?[a-zA-Z]", "", output)
+    output = re.sub(r"[\x07\x1b].*?[a-zA-Z]", "", output)
 
     output = re.sub(r"^\s*\n|\n\s*$", "", output)  # Removes empty lines at the beginning and end of the output
     return output
