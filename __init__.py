@@ -182,8 +182,11 @@ class OwnerUtils(breadcord.module.ModuleCog):
         async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
             new_out = clean_output(new_out)
 
+            if not new_out.strip():
+                if edit_kwargs:
+                    await response.edit(**edit_kwargs)
             # There's a newline before the output so that it doesn't accidentally add syntax highlighting
-            if len(codeblock := f"```\n{new_out}\n```") <= 2000:
+            elif len(codeblock := f"```\n{new_out}\n```") <= 2000:
                 await response.edit(content=codeblock + extra_text, **edit_kwargs)
             else:
                 await response.edit(
