@@ -69,9 +69,12 @@ class OwnerUtils(breadcord.module.ModuleCog):
     def __init__(self, module_id) -> None:
         super().__init__(module_id)
 
-        if not self.settings.rce_commands_enabled.value:
-            self.shell.enabled = False
-            self.evaluate.enabled = False
+        @self.settings.rce_commands_enabled.observe
+        def on_rce_commands_changed(_, new: bool) -> None:
+            self.shell.enabled = new
+            self.evaluate.enabled = new
+
+        on_rce_commands_changed(None, self.settings.rce_commands_enabled.value)
 
     @commands.command()
     @commands.is_owner()
@@ -107,7 +110,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         mode:
             Alternative sync modes.
             `clear` clears the commands and then syncs.
-            `copy` copies the global commands into the guild as guild specific commands.
+            `copy` copies the global commands into the guild as guild-specific commands.
         """
 
         guilds: list[discord.Guild] | Literal["all"] = guilds
