@@ -71,6 +71,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
         @self.settings.rce_commands_enabled.observe
         def on_rce_commands_changed(_, new: bool) -> None:
+            self.logger.debug(f"RCE commands {'enabled' if new else 'disabled'}")
             self.shell.enabled = new
             self.evaluate.enabled = new
 
@@ -221,6 +222,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         with redirect_stdout(io.StringIO()) as stdout:
             with redirect_stderr(io.StringIO()) as stderr:
                 try:
+                    # if eval(code) fails return_value may not be defined
                     if inspect.isawaitable(return_value := eval(code)):
                         return_value = await return_value
                 except Exception as error:
@@ -236,13 +238,18 @@ class OwnerUtils(breadcord.module.ModuleCog):
                 ```
             """)
 
-        if len(output := output_segment(value=return_value, title="Return value")
+        output = (
+            output_segment(value=return_value, title="Return value") if "return_value" in locals() else ""
             + (output_segment(value=exception, title="Exception") if exception is not None else "")
             + (output_segment(value=stdout, title="Output stream") if stdout else "")
             + (output_segment(value=stderr, title="Error stream") if stderr else "")
-        ) <= 2000:
+        )
+
+        if len(output) <= 2000:
             await response.edit(content=output)
         else:
+            if "return_value" not in locals():
+                return_value = None
             await response.edit(
                 content="Output too big, uploading as file(s).",
                 attachments=[
