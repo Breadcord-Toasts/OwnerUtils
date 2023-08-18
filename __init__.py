@@ -291,8 +291,12 @@ class OwnerUtils(breadcord.module.ModuleCog):
         """Evaluates python code."""
         # language=regexp
         code = strip_codeblock(code, language_regex=r"py(thon)?")
-        spoofed_globals = dict(__builtins__ = __builtins__,)
-        spoofed_locals = dict(self = self, ctx = ctx)
+        spoofed_globals = dict(
+            __builtins__ = __builtins__,
+            self=self,
+            ctx=ctx,
+            bot=self.bot,
+        )
 
         response = await ctx.reply("Evaluating...")
 
@@ -301,7 +305,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         with redirect_stdout(io.StringIO()) as stdout:
             with redirect_stderr(io.StringIO()) as stderr:
                 try:
-                    return_value = eval(code, spoofed_globals, spoofed_locals)
+                    return_value = eval(code, spoofed_globals, {})
                     if inspect.isawaitable(return_value):
                         return_value = await return_value
                 except Exception as error:
@@ -324,8 +328,13 @@ class OwnerUtils(breadcord.module.ModuleCog):
             f"    {line}" for line in code.splitlines()
         )
 
-        spoofed_globals = dict(__builtins__ = __builtins__,)
-        spoofed_locals = dict(self = self, ctx = ctx)
+        spoofed_globals = dict(
+            __builtins__ = __builtins__,
+            self=self,
+            ctx=ctx,
+            bot=self.bot,
+        )
+        spoofed_locals = {}
 
         response = await ctx.reply("Executing...")
 
