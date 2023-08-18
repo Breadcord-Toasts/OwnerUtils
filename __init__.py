@@ -61,15 +61,36 @@ async def format_output_as_args(
         )
 
 
-def prepare_for_codeblock(output: str, /) -> str:
-    output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
+def prepare_for_codeblock(string: str, /) -> str:
+    string = re.sub("```", "``\u200d`", string)  # \u200d is a zero width joiner
 
     # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
     # It should remove escape codes (I hope)
-    output = re.sub(r"[\x07\x1b].*?[a-zA-Z]", "", output)
+    string = re.sub(r"[\x07\x1b].*?[a-zA-Z]", "", string)
 
-    output = re.sub(r"^\s*\n|\n\s*$", "", output)  # Removes empty lines at the beginning and end of the output
-    return output
+    string = re.sub(r"^\s*\n|\n\s*$", "", string)  # Removes empty lines at the beginning and end of the output
+    return string
+
+
+def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: bool = True) -> str:
+    if language_regex and not language_regex.endswith("\n"):
+        language_regex = f"{language_regex}\n"
+    regex = re.compile(
+        # I adre not mark this as verbose
+        # Technically not actuate since
+        # ```lang
+        #
+        # ```
+        # won't match "lang"
+        rf"```(?P<language>{language_regex}){'?' if optional_lang else ''}.+```",
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    if match := regex.match(string):
+        start_strip = 3 + len(match["language"]) if match[1] else 3
+        string = string[start_strip:-3]
+
+    return inspect.cleandoc(string)
 
 
 class ShellInputModal(discord.ui.Modal, title="Shell input"):
@@ -223,10 +244,11 @@ class OwnerUtils(breadcord.module.ModuleCog):
     @commands.is_owner()
     async def shell(self, ctx: commands.Context, *, command: str) -> None:
         """Runs an arbitrary shell command."""
-
         response = await ctx.reply("Running...")
         process = await asyncio.create_subprocess_shell(
-            command,
+            # The shell could be just about anything, so a proper regex isn't worth the effort
+            # language=regexp
+            strip_codeblock(command, language_regex="[a-z]+"),
             shell=True,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -267,6 +289,8 @@ class OwnerUtils(breadcord.module.ModuleCog):
     @commands.is_owner()
     async def evaluate(self, ctx: commands.Context, *, code: str) -> None:
         """Evaluates python code."""
+        # language=regexp
+        code = strip_codeblock(code, language_regex=r"py(thon)?")
         spoofed_globals = dict(__builtins__ = __builtins__,)
         spoofed_locals = dict(self = self, ctx = ctx)
 
@@ -294,9 +318,12 @@ class OwnerUtils(breadcord.module.ModuleCog):
     @commands.is_owner()
     async def execute(self, ctx: commands.Context, *, code: str) -> None:
         """Executes python code (blocking)"""
+        # language=regexp
+        code = strip_codeblock(code, language_regex=r"py(thon)?")
         to_execute = "async def _execute():\n" + "\n".join(
             f"    {line}" for line in code.splitlines()
         )
+
         spoofed_globals = dict(__builtins__ = __builtins__,)
         spoofed_locals = dict(self = self, ctx = ctx)
 
