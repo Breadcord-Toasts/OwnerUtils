@@ -11,7 +11,57 @@ from discord.ext import commands
 import breadcord
 
 
-def clean_output(output: str, /) -> str:
+# noinspection PyProtectedMember
+class _UndefinedVar(discord.utils._MissingSentinel):
+    pass
+
+
+UNDEFINED: Any = _UndefinedVar()
+
+
+async def format_output_as_args(
+    return_value: Any | _UndefinedVar,
+    exception: Exception | _UndefinedVar,
+    stdout: str | None,
+    stderr: str | None,
+):
+    def output_segment(*, value: Any, title: str) -> str:
+        return inspect.cleandoc(f"""
+            **{discord.utils.escape_markdown(title)}**
+            ```
+            {prepare_for_codeblock(str(value))}
+            ```
+        """)
+
+    output = (
+        (output_segment(value=return_value, title="Return value")    if return_value is not UNDEFINED else "")
+        + (output_segment(value=exception, title="Exception")       if exception is not UNDEFINED else "")
+        + (output_segment(value=stdout, title="Output stream")      if stdout else "")
+        + (output_segment(value=stderr, title="Error stream")       if stderr else "")
+    )
+
+    if not output:
+        return dict(content="No output")
+
+    if len(output) <= 2000:
+        return dict(content=output)
+    else:
+        return dict(
+            content="Output too big, uploading as file(s).",
+            attachments=[
+                discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
+                for content, filename in (
+                    (return_value,  "return.txt"),
+                    (exception,     "exception.txt"),
+                    (stdout,        "stdout.txt"),
+                    (stderr,        "stderr.txt")
+                )
+                if content is not UNDEFINED
+            ]
+        )
+
+
+def prepare_for_codeblock(output: str, /) -> str:
     output = re.sub("```", "``\u200d`", output)  # \u200d is a zero width joiner
 
     # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
@@ -74,6 +124,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
             self.logger.debug(f"RCE commands {'enabled' if new else 'disabled'}")
             self.shell.enabled = new
             self.evaluate.enabled = new
+            self.execute.enabled = new
 
         on_rce_commands_changed(None, self.settings.rce_commands_enabled.value)
 
@@ -184,7 +235,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         shell_view = ShellView(process, user_id=ctx.author.id)
 
         async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
-            new_out = clean_output(new_out)
+            new_out = prepare_for_codeblock(new_out)
 
             if not new_out.strip():
                 if edit_kwargs:
@@ -216,53 +267,57 @@ class OwnerUtils(breadcord.module.ModuleCog):
     @commands.is_owner()
     async def evaluate(self, ctx: commands.Context, *, code: str) -> None:
         """Evaluates python code."""
+        spoofed_globals = dict(__builtins__ = __builtins__,)
+        spoofed_locals = dict(self = self, ctx = ctx)
+
         response = await ctx.reply("Evaluating...")
 
-        exception = None
+        return_value = UNDEFINED
+        exception = UNDEFINED
         with redirect_stdout(io.StringIO()) as stdout:
             with redirect_stderr(io.StringIO()) as stderr:
                 try:
-                    # if eval(code) fails return_value may not be defined
-                    if inspect.isawaitable(return_value := eval(code)):
+                    return_value = eval(code, spoofed_globals, spoofed_locals)
+                    if inspect.isawaitable(return_value):
                         return_value = await return_value
                 except Exception as error:
                     exception = error
-        stdout = stdout.getvalue()
-        stderr = stderr.getvalue()
 
-        def output_segment(*, value: Any, title: str) -> str:
-            return inspect.cleandoc(f"""
-                **{discord.utils.escape_markdown(title)}**
-                ```
-                {clean_output(str(value))}
-                ```
-            """)
+        await response.edit(**await format_output_as_args(
+            return_value,
+            exception,
+            stdout.getvalue(),
+            stderr.getvalue()
+        ))
 
-        output = (
-            output_segment(value=return_value, title="Return value") if "return_value" in locals() else ""
-            + (output_segment(value=exception, title="Exception") if exception is not None else "")
-            + (output_segment(value=stdout, title="Output stream") if stdout else "")
-            + (output_segment(value=stderr, title="Error stream") if stderr else "")
+    @commands.command(aliases=["exec"])
+    @commands.is_owner()
+    async def execute(self, ctx: commands.Context, *, code: str) -> None:
+        """Executes python code (blocking)"""
+        to_execute = "async def _execute():\n" + "\n".join(
+            f"    {line}" for line in code.splitlines()
         )
+        spoofed_globals = dict(__builtins__ = __builtins__,)
+        spoofed_locals = dict(self = self, ctx = ctx)
 
-        if len(output) <= 2000:
-            await response.edit(content=output)
-        else:
-            if "return_value" not in locals():
-                return_value = None
-            await response.edit(
-                content="Output too big, uploading as file(s).",
-                attachments=[
-                    discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
-                    for content, filename in (
-                        (return_value,      "return.txt"),
-                        (exception,         "exception.txt"),
-                        (stdout or None,    "stdout.txt"),
-                        (stderr or None,    "stderr.txt")
-                    )
-                    if content is not None
-                ]
-            )
+        response = await ctx.reply("Executing...")
+
+        return_value = UNDEFINED
+        exception = UNDEFINED
+        with redirect_stdout(io.StringIO()) as stdout:
+            with redirect_stderr(io.StringIO()) as stderr:
+                try:
+                    exec(to_execute, spoofed_globals, spoofed_locals)
+                    return_value = await spoofed_locals["_execute"]() or UNDEFINED
+                except Exception as error:
+                    exception = error
+
+        await response.edit(**await format_output_as_args(
+            return_value,
+            exception,
+            stdout.getvalue(),
+            stderr.getvalue()
+        ))
 
 
 async def setup(bot: breadcord.Bot):
