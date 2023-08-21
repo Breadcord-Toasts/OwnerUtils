@@ -156,7 +156,6 @@ class OwnerUtils(breadcord.module.ModuleCog):
         self.logger.info("Stopping bot")
         await ctx.reply("Stopping bot")
         await self.bot.close()
-        exit()
 
     # The docstring is only meant to be used by the help command
     # noinspection PyIncorrectDocstring
