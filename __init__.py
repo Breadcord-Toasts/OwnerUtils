@@ -27,6 +27,7 @@ DEFAULT_GLOBALS = dict(
     pp=pp,
     Path=Path,
     io=io,
+    breadcord=breadcord
 )
 
 
