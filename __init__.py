@@ -10,6 +10,7 @@ from pathlib import Path
 from pprint import pprint, pp
 from typing import Literal, Any
 
+import aiohttp
 import discord.abc
 from discord.ext import commands
 
@@ -166,6 +167,13 @@ class OwnerUtils(breadcord.module.ModuleCog):
             self.execute.enabled = new
 
         on_rce_commands_changed(None, self.settings.rce_commands_enabled.value)
+
+    async def cog_load(self) -> None:
+        DEFAULT_GLOBALS["session"] = aiohttp.ClientSession()
+
+    async def cog_unload(self) -> None:
+        await DEFAULT_GLOBALS["session"].close()
+        del DEFAULT_GLOBALS["session"]
 
     @commands.command()
     @commands.is_owner()
