@@ -305,7 +305,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
     @commands.command(aliases=["eval"])
     @commands.is_owner()
     async def evaluate(self, ctx: commands.Context, *, code: str) -> None:
-        """Evaluates python code."""
+        """Evaluates python code (blocking)"""
         # language=regexp
         code = strip_codeblock(code, language_regex=r"py(thon)?")
         spoofed_globals = DEFAULT_GLOBALS | dict(
