@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from pprint import pprint, pp
@@ -58,11 +59,11 @@ async def format_output_as_kwargs(
     stderr: str | None,
 ) -> dict[str, Any]:
     def output_segment(*, value: Any, title: str) -> str:
-        return inspect.cleandoc(f"""
-            **{discord.utils.escape_markdown(title)}**```
-            {prepare_for_codeblock(str(value))}
-            ```
-        """)
+        return (
+            f"**{discord.utils.escape_markdown(title)}**```\n"
+            f"{prepare_for_codeblock(str(value))}\n"
+            "```"
+        )
 
     output = (
         (output_segment(value=return_value, title="Return value") if return_value is not UNDEFINED else "")
@@ -109,7 +110,14 @@ def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: boo
         start_strip = 3 + len(match["language"]) if match[1] else 3
         string = string[start_strip:-3]
 
-    return inspect.cleandoc(string)
+    lines = string.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    string = "\n".join(lines)
+
+    return textwrap.dedent(string)
 
 
 class ShellInputModal(discord.ui.Modal, title="Shell input"):
