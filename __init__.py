@@ -1,14 +1,33 @@
 import asyncio
 import inspect
 import io
+import json
+import os
 import re
+import sys
 from contextlib import redirect_stdout, redirect_stderr
+from pathlib import Path
+from pprint import pprint, pp
 from typing import Literal, Any
 
 import discord.abc
 from discord.ext import commands
 
 import breadcord
+
+DEFAULT_GLOBALS = dict(
+    __builtins__=__builtins__,
+    discord=discord,
+    commands=commands,
+    re=re,
+    json=json,
+    os=os,
+    sys=sys,
+    pprint=pprint,
+    pp=pp,
+    Path=Path,
+    io=io,
+)
 
 
 # noinspection PyProtectedMember
@@ -17,48 +36,6 @@ class _UndefinedVar(discord.utils._MissingSentinel):
 
 
 UNDEFINED: Any = _UndefinedVar()
-
-
-async def format_output_as_args(
-    return_value: Any | _UndefinedVar,
-    exception: Exception | _UndefinedVar,
-    stdout: str | None,
-    stderr: str | None,
-):
-    def output_segment(*, value: Any, title: str) -> str:
-        return inspect.cleandoc(f"""
-            **{discord.utils.escape_markdown(title)}**
-            ```
-            {prepare_for_codeblock(str(value))}
-            ```
-        """)
-
-    output = (
-        (output_segment(value=return_value, title="Return value")    if return_value is not UNDEFINED else "")
-        + (output_segment(value=exception, title="Exception")       if exception is not UNDEFINED else "")
-        + (output_segment(value=stdout, title="Output stream")      if stdout else "")
-        + (output_segment(value=stderr, title="Error stream")       if stderr else "")
-    )
-
-    if not output:
-        return dict(content="No output")
-
-    if len(output) <= 2000:
-        return dict(content=output)
-    else:
-        return dict(
-            content="Output too big, uploading as file(s).",
-            attachments=[
-                discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
-                for content, filename in (
-                    (return_value,  "return.txt"),
-                    (exception,     "exception.txt"),
-                    (stdout,        "stdout.txt"),
-                    (stderr,        "stderr.txt")
-                )
-                if content is not UNDEFINED
-            ]
-        )
 
 
 def prepare_for_codeblock(string: str, /) -> str:
@@ -72,16 +49,56 @@ def prepare_for_codeblock(string: str, /) -> str:
     return string
 
 
+async def format_output_as_kwargs(
+    return_value: Any | _UndefinedVar,
+    exception: Exception | _UndefinedVar,
+    stdout: str | None,
+    stderr: str | None,
+) -> dict[str, Any]:
+    def output_segment(*, value: Any, title: str) -> str:
+        return inspect.cleandoc(f"""
+            **{discord.utils.escape_markdown(title)}**```
+            {prepare_for_codeblock(str(value))}
+            ```
+        """)
+
+    output = (
+        (output_segment(value=return_value, title="Return value") if return_value is not UNDEFINED else "")
+        + (output_segment(value=exception, title="Exception") if exception is not UNDEFINED else "")
+        + (output_segment(value=stdout, title="Output stream") if stdout else "")
+        + (output_segment(value=stderr, title="Error stream") if stderr else "")
+    )
+
+    if not output:
+        return dict(content="No output")
+
+    if len(output) <= 2000:
+        return dict(content=output)
+    else:
+        return dict(
+            content="Output too big, uploading as file(s).",
+            attachments=[
+                discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
+                for content, filename in (
+                    (return_value, "return.txt"),
+                    (exception, "exception.txt"),
+                    (stdout or UNDEFINED, "stdout.txt"),
+                    (stderr or UNDEFINED, "stderr.txt")
+                )
+                if content is not UNDEFINED
+            ]
+        )
+
+
 def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: bool = True) -> str:
     if language_regex and not language_regex.endswith("\n"):
         language_regex = f"{language_regex}\n"
     regex = re.compile(
-        # I adre not mark this as verbose
-        # Technically not actuate since
+        # This is technically not accurate since
         # ```lang
         #
         # ```
-        # won't match "lang"
+        # won't match "lang".
         rf"```(?P<language>{language_regex}){'?' if optional_lang else ''}.+```",
         flags=re.DOTALL | re.IGNORECASE
     )
@@ -290,8 +307,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         """Evaluates python code."""
         # language=regexp
         code = strip_codeblock(code, language_regex=r"py(thon)?")
-        spoofed_globals = dict(
-            __builtins__ = __builtins__,
+        spoofed_globals = DEFAULT_GLOBALS | dict(
             self=self,
             ctx=ctx,
             bot=self.bot,
@@ -310,7 +326,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
                 except Exception as error:
                     exception = error
 
-        await response.edit(**await format_output_as_args(
+        await response.edit(**await format_output_as_kwargs(
             return_value,
             exception,
             stdout.getvalue(),
@@ -327,8 +343,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
             f"    {line}" for line in code.splitlines()
         )
 
-        spoofed_globals = dict(
-            __builtins__ = __builtins__,
+        spoofed_globals = DEFAULT_GLOBALS | dict(
             self=self,
             ctx=ctx,
             bot=self.bot,
@@ -347,7 +362,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
                 except Exception as error:
                     exception = error
 
-        await response.edit(**await format_output_as_args(
+        await response.edit(**await format_output_as_kwargs(
             return_value,
             exception,
             stdout.getvalue(),
