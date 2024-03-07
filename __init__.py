@@ -81,7 +81,7 @@ async def format_output_as_kwargs(
         return dict(
             content="Output too big, uploading as file(s).",
             attachments=[
-                discord.File(io.BytesIO(str(content).encode("utf-8")), filename=filename)
+                discord.File(io.BytesIO(str(content).encode()), filename=filename)
                 for content, filename in (
                     (return_value, "return.txt"),
                     (exception, "exception.txt"),
@@ -93,7 +93,13 @@ async def format_output_as_kwargs(
         )
 
 
-def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: bool = True) -> str:
+def strip_codeblock(
+    string: str,
+    *,
+    language_regex: str = "",
+    optional_lang: bool = True,
+    strip_inline: bool = True
+) -> str:
     if language_regex and not language_regex.endswith("\n"):
         language_regex = f"{language_regex}\n"
     regex = re.compile(
@@ -107,7 +113,7 @@ def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: boo
     )
 
     if match := regex.match(string):
-        start_strip = 3 + len(match["language"]) if match[1] else 3
+        start_strip = 3 + (len(match["language"]) if match[1] else 0)
         string = string[start_strip:-3]
 
     lines = string.splitlines()
@@ -116,6 +122,9 @@ def strip_codeblock(string: str, *, language_regex: str = "", optional_lang: boo
     while lines and not lines[-1].strip():
         lines.pop()
     string = "\n".join(lines)
+
+    if strip_inline and re.match(r"^\s*`(?!`)", string) and re.match(r"(?<!`)`\s*$", string):
+        string = string[1:-1]
 
     return textwrap.dedent(string)
 
@@ -130,7 +139,7 @@ class ShellInputModal(discord.ui.Modal, title="Shell input"):
         self.process = process
 
     async def on_submit(self, interaction: discord.Interaction):
-        self.process.stdin.write(self.shell_input.value.encode("utf-8"))
+        self.process.stdin.write(self.shell_input.value.encode())
         await interaction.response.defer()
 
 
@@ -282,7 +291,6 @@ class OwnerUtils(breadcord.module.ModuleCog):
             # The shell could be just about anything, so a proper regex isn't worth the effort
             # language=regexp
             strip_codeblock(command, language_regex="[a-z]+"),
-            shell=True,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -301,18 +309,18 @@ class OwnerUtils(breadcord.module.ModuleCog):
             else:
                 await response.edit(
                     content=f"Output too long, uploading as file.{extra_text}",
-                    attachments=[discord.File(io.BytesIO(new_out.encode("utf-8")), filename="output.txt")],
+                    attachments=[discord.File(io.BytesIO(new_out.encode()), filename="output.txt")],
                     **edit_kwargs
                 )
 
         await asyncio.sleep(update_interval := self.settings.shell_update_interval_seconds.value)
         out = ""
         while process.returncode is None:
-            out += (await process.stdout.read(1024)).decode("utf-8")
+            out += (await process.stdout.read(1024)).decode()
             if out.strip():
                 await update_output(out, view=shell_view)
             await asyncio.sleep(update_interval)
-        out += (await process.communicate())[0].decode("utf-8")
+        out += (await process.communicate())[0].decode()
         await update_output(out)
 
         response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
@@ -328,6 +336,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
             self=self,
             ctx=ctx,
             bot=self.bot,
+            reference=ctx.message.reference.cached_message,
         )
 
         response = await ctx.reply("Evaluating...")
@@ -359,11 +368,11 @@ class OwnerUtils(breadcord.module.ModuleCog):
         to_execute = "async def _execute():\n" + "\n".join(
             f"    {line}" for line in code.splitlines()
         )
-
         spoofed_globals = DEFAULT_GLOBALS | dict(
             self=self,
             ctx=ctx,
             bot=self.bot,
+            reference=ctx.message.reference.cached_message,
         )
         spoofed_locals = {}
 
