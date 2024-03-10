@@ -332,12 +332,13 @@ class OwnerUtils(breadcord.module.ModuleCog):
         """Evaluates python code (blocking)"""
         # language=regexp
         code = strip_codeblock(code, language_regex=r"py(thon)?")
-        spoofed_globals = DEFAULT_GLOBALS | dict(
+        spoofed_globals: dict = DEFAULT_GLOBALS | dict(
             self=self,
             ctx=ctx,
             bot=self.bot,
-            reference=ctx.message.reference.cached_message,
         )
+        if ctx.message.reference:
+            spoofed_globals["reference"] = ctx.message.reference.cached_message
 
         response = await ctx.reply("Evaluating...")
 
@@ -368,12 +369,14 @@ class OwnerUtils(breadcord.module.ModuleCog):
         to_execute = "async def _execute():\n" + "\n".join(
             f"    {line}" for line in code.splitlines()
         )
-        spoofed_globals = DEFAULT_GLOBALS | dict(
+        spoofed_globals: dict = DEFAULT_GLOBALS | dict(
             self=self,
             ctx=ctx,
             bot=self.bot,
-            reference=ctx.message.reference.cached_message,
         )
+        if ctx.message.reference:
+            spoofed_globals["reference"] = ctx.message.reference.cached_message
+
         spoofed_locals = {}
 
         response = await ctx.reply("Executing...")
