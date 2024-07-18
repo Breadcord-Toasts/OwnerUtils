@@ -58,9 +58,9 @@ async def format_output_as_kwargs(
     stdout: str | None,
     stderr: str | None,
 ) -> dict[str, Any]:
-    def output_segment(*, value: Any, title: str) -> str:
+    def output_segment(*, value: Any, title: str, colour: bool = False) -> str:
         return (
-            f"**{discord.utils.escape_markdown(title)}**```\n"
+            f"**{discord.utils.escape_markdown(title)}**```{'ansi' if colour else ''}\n"
             f"{prepare_for_codeblock(str(value))}\n"
             "```"
         )
@@ -68,7 +68,7 @@ async def format_output_as_kwargs(
     output = (
         (output_segment(value=return_value, title="Return value") if return_value is not UNDEFINED else "")
         + (output_segment(value=exception, title="Exception") if exception is not UNDEFINED else "")
-        + (output_segment(value=stdout, title="Output stream") if stdout else "")
+        + (output_segment(value=stdout, title="Output stream", colour=True) if stdout else "")
         + (output_segment(value=stderr, title="Error stream") if stderr else "")
     )
 
