@@ -297,7 +297,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
         if mode == "clear":
             response = await ctx.reply(f"Clearing commands in {target_message}..")
             for guild in targets:
-                ctx.bot.tree.clear_commands(guild=guild)
+                ctx.bot.tree.clear_commands(guild=guild, type=clear_command_type)
                 await ctx.bot.tree.sync(guild=guild)
             await response.edit(content=f"Cleared commands in {target_message}")
             return
