@@ -1,36 +1,13 @@
 import asyncio
-import inspect
 import io
-import json
-import os
 import re
-import sys
 import textwrap
-from contextlib import redirect_stdout, redirect_stderr
-from pathlib import Path
-from pprint import pprint, pp
 from typing import Any
 
-import aiohttp
 import discord.abc
 from discord.ext import commands
 
 import breadcord
-
-DEFAULT_GLOBALS = dict(
-    __builtins__=__builtins__,
-    discord=discord,
-    commands=commands,
-    re=re,
-    json=json,
-    os=os,
-    sys=sys,
-    pprint=pprint,
-    pp=pp,
-    Path=Path,
-    io=io,
-    breadcord=breadcord
-)
 
 
 # noinspection PyProtectedMember
@@ -50,47 +27,6 @@ def prepare_for_codeblock(string: str, /) -> str:
 
     string = re.sub(r"^\s*\n|\n\s*$", "", string)  # Removes empty lines at the beginning and end of the output
     return string
-
-
-async def format_output_as_kwargs(
-    return_value: Any | _UndefinedVar,
-    exception: Exception | _UndefinedVar,
-    stdout: str | None,
-    stderr: str | None,
-) -> dict[str, Any]:
-    def output_segment(*, value: Any, title: str, colour: bool = False) -> str:
-        return (
-            f"**{discord.utils.escape_markdown(title)}**```{'ansi' if colour else ''}\n"
-            f"{prepare_for_codeblock(str(value))}\n"
-            "```"
-        )
-
-    output = (
-        (output_segment(value=return_value, title="Return value") if return_value is not UNDEFINED else "")
-        + (output_segment(value=exception, title="Exception") if exception is not UNDEFINED else "")
-        + (output_segment(value=stdout, title="Output stream", colour=True) if stdout else "")
-        + (output_segment(value=stderr, title="Error stream") if stderr else "")
-    )
-
-    if not output:
-        return dict(content="No output")
-
-    if len(output) <= 2000:
-        return dict(content=output)
-    else:
-        return dict(
-            content="Output too big, uploading as file(s).",
-            attachments=[
-                discord.File(io.BytesIO(str(content).encode()), filename=filename)
-                for content, filename in (
-                    (return_value, "return.txt"),
-                    (exception, "exception.txt"),
-                    (stdout or UNDEFINED, "stdout.txt"),
-                    (stderr or UNDEFINED, "stderr.txt")
-                )
-                if content is not UNDEFINED
-            ]
-        )
 
 
 def strip_codeblock(
@@ -180,17 +116,8 @@ class OwnerUtils(breadcord.module.ModuleCog):
         def on_rce_commands_changed(_, new: bool) -> None:
             self.logger.debug(f"RCE commands {'enabled' if new else 'disabled'}")
             self.shell.enabled = new
-            self.evaluate.enabled = new
-            self.execute.enabled = new
 
         on_rce_commands_changed(None, self.settings.rce_commands_enabled.value)
-
-    async def cog_load(self) -> None:
-        DEFAULT_GLOBALS["session"] = aiohttp.ClientSession()
-
-    async def cog_unload(self) -> None:
-        await DEFAULT_GLOBALS["session"].close()
-        del DEFAULT_GLOBALS["session"]
 
     @commands.command()
     @commands.is_owner()
@@ -362,78 +289,6 @@ class OwnerUtils(breadcord.module.ModuleCog):
 
         response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
         await response.edit(content=f"{response.content}\nProcess exited with code {process.returncode}", view=None)
-
-    @commands.command(aliases=["eval"])
-    @commands.is_owner()
-    async def evaluate(self, ctx: commands.Context, *, code: str) -> None:
-        """Evaluates python code (blocking)"""
-        # language=regexp
-        code = strip_codeblock(code, language_regex=r"py(thon)?")
-        spoofed_globals: dict = DEFAULT_GLOBALS | dict(
-            self=self,
-            ctx=ctx,
-            bot=self.bot,
-        )
-        if ctx.message.reference:
-            spoofed_globals["reference"] = ctx.message.reference.cached_message
-
-        response = await ctx.reply("Evaluating...")
-
-        return_value = UNDEFINED
-        exception = UNDEFINED
-        with redirect_stdout(io.StringIO()) as stdout:
-            with redirect_stderr(io.StringIO()) as stderr:
-                try:
-                    return_value = eval(code, spoofed_globals, {})
-                    if inspect.isawaitable(return_value):
-                        return_value = await return_value
-                except Exception as error:
-                    exception = error
-
-        await response.edit(**await format_output_as_kwargs(
-            return_value,
-            exception,
-            stdout.getvalue(),
-            stderr.getvalue()
-        ))
-
-    @commands.command(aliases=["exec"])
-    @commands.is_owner()
-    async def execute(self, ctx: commands.Context, *, code: str) -> None:
-        """Executes python code (blocking)"""
-        # language=regexp
-        code = strip_codeblock(code, language_regex=r"py(thon)?")
-        to_execute = "async def _execute():\n" + "\n".join(
-            f"    {line}" for line in code.splitlines()
-        )
-        spoofed_globals: dict = DEFAULT_GLOBALS | dict(
-            self=self,
-            ctx=ctx,
-            bot=self.bot,
-        )
-        if ctx.message.reference:
-            spoofed_globals["reference"] = ctx.message.reference.cached_message
-
-        spoofed_locals = {}
-
-        response = await ctx.reply("Executing...")
-
-        return_value = UNDEFINED
-        exception = UNDEFINED
-        with redirect_stdout(io.StringIO()) as stdout:
-            with redirect_stderr(io.StringIO()) as stderr:
-                try:
-                    exec(to_execute, spoofed_globals, spoofed_locals)
-                    return_value = await spoofed_locals["_execute"]() or UNDEFINED
-                except Exception as error:
-                    exception = error
-
-        await response.edit(**await format_output_as_kwargs(
-            return_value,
-            exception,
-            stdout.getvalue(),
-            stderr.getvalue()
-        ))
 
 
 async def setup(bot: breadcord.Bot, module: breadcord.module.Module) -> None:
