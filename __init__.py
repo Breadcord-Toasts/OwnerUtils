@@ -1,124 +1,10 @@
-import asyncio
-import io
-import re
-import textwrap
-from typing import Any
-
 import discord.abc
 from discord.ext import commands
 
 import breadcord
 
 
-# noinspection PyProtectedMember
-class _UndefinedVar(discord.utils._MissingSentinel):
-    pass
-
-
-UNDEFINED: Any = _UndefinedVar()
-
-
-def prepare_for_codeblock(string: str, /) -> str:
-    string = re.sub("```", "``\u200d`", string)  # \u200d is a zero width joiner
-
-    # I'll be honest, this was writen by ChatGPT and cleaned up by me lmao
-    # It should remove escape codes (I hope)
-    string = re.sub(r"[\x07\x1b].*?[a-zA-Z]", "", string)
-
-    string = re.sub(r"^\s*\n|\n\s*$", "", string)  # Removes empty lines at the beginning and end of the output
-    return string
-
-
-def strip_codeblock(
-    string: str,
-    *,
-    language_regex: str = "",
-    optional_lang: bool = True,
-    strip_inline: bool = True
-) -> str:
-    if language_regex and not language_regex.endswith("\n"):
-        language_regex = f"{language_regex}\n"
-    regex = re.compile(
-        # This is technically not accurate since
-        # ```lang
-        #
-        # ```
-        # won't match "lang".
-        rf"```(?P<language>{language_regex}){'?' if optional_lang else ''}.+```",
-        flags=re.DOTALL | re.IGNORECASE
-    )
-
-    if match := regex.match(string):
-        start_strip = 3 + (len(match["language"]) if match[1] else 0)
-        string = string[start_strip:-3]
-
-    lines = string.splitlines()
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    string = "\n".join(lines)
-
-    if strip_inline and re.match(r"^\s*`(?!`)", string) and re.match(r"(?<!`)`\s*$", string):
-        string = string[1:-1]
-
-    return textwrap.dedent(string)
-
-
-class ShellInputModal(discord.ui.Modal, title="Shell input"):
-    shell_input = discord.ui.TextInput(
-        label="Input", placeholder="Input to send to the running shell", style=discord.TextStyle.long
-    )
-
-    def __init__(self, process: asyncio.subprocess.Process):
-        super().__init__()
-        self.process = process
-
-    async def on_submit(self, interaction: discord.Interaction):
-        self.process.stdin.write(self.shell_input.value.encode())
-        await interaction.response.defer()
-
-
-class ShellView(discord.ui.View):
-    def __init__(self, process: asyncio.subprocess.Process, *, user_id: int) -> None:
-        super().__init__(timeout=None)
-        self.process = process
-        self.user_id = user_id
-
-    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.red)
-    async def cancel(self, interaction: discord.Interaction, *_) -> None:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                f'Only <@{self.user_id}> can perform this action!',
-                ephemeral=True
-            )
-            return
-        self.process.terminate()
-        self.stop()
-
-    @discord.ui.button(label='Send input', style=discord.ButtonStyle.gray)
-    async def send_input(self, interaction: discord.Interaction, _) -> None:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                f'Only <@{self.user_id}> can perform this action!',
-                ephemeral=True
-            )
-            return
-        input_modal = ShellInputModal(self.process)
-        await interaction.response.send_modal(input_modal)
-
-
 class OwnerUtils(breadcord.module.ModuleCog):
-    def __init__(self, module_id) -> None:
-        super().__init__(module_id)
-
-        @self.settings.rce_commands_enabled.observe
-        def on_rce_commands_changed(_, new: bool) -> None:
-            self.logger.debug(f"RCE commands {'enabled' if new else 'disabled'}")
-            self.shell.enabled = new
-
-        on_rce_commands_changed(None, self.settings.rce_commands_enabled.value)
-
     @commands.command()
     @commands.is_owner()
     async def stop(self, ctx: commands.Context) -> None:
@@ -196,7 +82,7 @@ class OwnerUtils(breadcord.module.ModuleCog):
                 raise commands.BadArgument(f"Invalid clear command type: {clear_command_type}")
             clear_command_type = valid_clear_command_types[clear_command_type]
 
-        if scope in local_scopes:
+        if scope in local_scopes and ctx.guild is not None:
             guilds.append(ctx.guild)
 
         targets = list(set(guilds)) or None
@@ -245,50 +131,6 @@ class OwnerUtils(breadcord.module.ModuleCog):
             await ctx.reply(str(error))
             return
         raise error
-
-    @commands.command()
-    @commands.is_owner()
-    async def shell(self, ctx: commands.Context, *, command: str) -> None:
-        """Runs an arbitrary shell command."""
-        response = await ctx.reply("Running...")
-        process = await asyncio.create_subprocess_shell(
-            # The shell could be just about anything, so a proper regex isn't worth the effort
-            # language=regexp
-            strip_codeblock(command, language_regex="[a-z]+"),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        shell_view = ShellView(process, user_id=ctx.author.id)
-
-        async def update_output(new_out: str, /, *, extra_text: str = "", **edit_kwargs) -> None:
-            new_out = prepare_for_codeblock(new_out)
-
-            if not new_out.strip():
-                if edit_kwargs:
-                    await response.edit(**edit_kwargs)
-            # There's a newline before the output so that it doesn't accidentally add syntax highlighting
-            elif len(codeblock := f"```\n{new_out}\n```") <= 2000:
-                await response.edit(content=codeblock + extra_text, **edit_kwargs)
-            else:
-                await response.edit(
-                    content=f"Output too long, uploading as file.{extra_text}",
-                    attachments=[discord.File(io.BytesIO(new_out.encode()), filename="output.txt")],
-                    **edit_kwargs
-                )
-
-        await asyncio.sleep(update_interval := self.settings.shell_update_interval_seconds.value)
-        out = ""
-        while process.returncode is None:
-            out += (await process.stdout.read(1024)).decode()
-            if out.strip():
-                await update_output(out, view=shell_view)
-            await asyncio.sleep(update_interval)
-        out += (await process.communicate())[0].decode()
-        await update_output(out)
-
-        response = await response.channel.fetch_message(response.id)  # Gets the message with its current content
-        await response.edit(content=f"{response.content}\nProcess exited with code {process.returncode}", view=None)
 
 
 async def setup(bot: breadcord.Bot, module: breadcord.module.Module) -> None:

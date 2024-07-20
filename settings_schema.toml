@@ -1,5 +1,0 @@
-# Wether RCE (Remove Code Execution) related commands should be enabled, if you don't need them, leave them off
-rce_commands_enabled = false
-
-# How often to update the output of the shell command
-shell_update_interval_seconds = 2
